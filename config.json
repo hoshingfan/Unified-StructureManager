@@ -1,0 +1,12 @@
+﻿{
+    "SourcePath":  "D:\\deptshare\\CoffeeConcepts",
+    "ExportFolders":  true,
+    "Mode":  "Export",
+    "DestinationPath":  "E:\\hkt\\Unified-StructureManager\\Reports",
+    "EnableCutoff":  true,
+    "Force":  false,
+    "CsvPath":  "CoffeeConcepts.csv",
+    "CutoffDate":  "2019-10-31",
+    "ExportFiles":  true,
+    "VerboseLogging":  false
+}
