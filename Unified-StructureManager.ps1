@@ -89,93 +89,155 @@ function Get-RelativePath {
 #  Export mode (with Files/Folders selection)
 # ------------------------------------------------------------
 function Export-Structure {
-    param($Path, $OutputCsv, $CutoffDate, $ExportFiles, $ExportFolders)
-    
-    Write-Log "=== Exporting File and Folder Structure ===" -Level "INFO" -ForegroundColor Cyan
-    Write-Log "Source: $Path" -Level "INFO" -ForegroundColor Yellow
-    Write-Log "Output: $OutputCsv" -Level "INFO" -ForegroundColor Yellow
-    if ($CutoffDate) {
-        Write-Log "Cutoff date: $($CutoffDate.ToString('yyyy-MM-dd')) (only files with LastWriteTime < cutoff)" -Level "INFO" -ForegroundColor Magenta
+    param(
+        $Path,
+        $OutputCsv,
+        $CutoffDate,
+        $ExportFiles,
+        $ExportFolders
+    )
+
+    Write-Log "=== Exporting File and Folder Structure ===" -ForegroundColor Cyan
+
+    if (Test-Path $OutputCsv) {
+        Remove-Item $OutputCsv -Force
     }
-    Write-Log "Export options: Files=$ExportFiles, Folders=$ExportFolders" -Level "INFO" -ForegroundColor Cyan
-    Write-Log "Log file: $script:LogFile" -Level "INFO" -ForegroundColor Gray
-    
-    $allItems = @()
-    
-    # 1. Export folders if requested
+
+    $csvHeader = [PSCustomObject]@{
+        FullName      = ""
+        Name          = ""
+        Length        = 0
+        Size_MB       = 0
+        CreationTime  = ""
+        LastWriteTime = ""
+        Type          = ""
+        DirectoryName = ""
+    }
+
+    $csvHeader |
+        Select-Object * |
+        Export-Csv $OutputCsv -NoTypeInformation -Encoding UTF8
+
+    $folderCount = 0
+    $fileCount = 0
+
+    # =====================================================
+    # FOLDERS
+    # =====================================================
+
     if ($ExportFolders) {
-        Write-Log "Step 1: Scanning directories..." -Level "INFO" -ForegroundColor Cyan
-        $allDirs = Get-ChildItem -Path $Path -Recurse -Force -Directory -ErrorAction SilentlyContinue
-        # Also include the root directory itself
-        $allDirs = @(Get-Item -Path $Path -Force) + $allDirs
-        Write-Log "Found $($allDirs.Count) directories" -Level "INFO" -ForegroundColor Green
-        
-        $counter = 0
-        foreach ($dir in $allDirs) {
-            $counter++
-            if ($counter % 1000 -eq 0) {
-                Write-Log "  Processing directories: $counter/$($allDirs.Count)" -Level "INFO" -ForegroundColor Gray
+
+        Write-Log "Step 1: Exporting folders..." -ForegroundColor Cyan
+
+        try {
+
+            Get-ChildItem `
+                -Path $Path `
+                -Directory `
+                -Recurse `
+                -Force `
+                -ErrorAction SilentlyContinue |
+
+            ForEach-Object {
+
+                try {
+
+                    $folderCount++
+
+                    if ($folderCount % 1000 -eq 0) {
+                        Write-Log "Folders exported: $folderCount"
+                    }
+
+                    [PSCustomObject]@{
+                        FullName      = $_.FullName
+                        Name          = $_.Name
+                        Length        = 0
+                        Size_MB       = 0
+                        CreationTime  = $_.CreationTime
+                        LastWriteTime = $_.LastWriteTime
+                        Type          = "Folder"
+                        DirectoryName = $_.Parent.FullName
+                    } |
+                    ConvertTo-Csv -NoTypeInformation |
+                    Select-Object -Skip 1 |
+                    Add-Content $OutputCsv
+
+                }
+                catch {
+                    Write-Log "Skipped folder: $($_.FullName)"
+                }
+
             }
-            $allItems += [PSCustomObject]@{
-                FullName      = $dir.FullName
-                Name          = $dir.Name
-                Length        = 0
-                Size_MB       = 0
-                CreationTime  = $dir.CreationTime.ToString('M/d/yyyy h:mm:ss tt')
-                LastWriteTime = $dir.LastWriteTime.ToString('M/d/yyyy h:mm:ss tt')
-                Type          = "Folder"
-                DirectoryName = $dir.Parent.FullName
-            }
+
         }
+        catch {
+            Write-Log $_.Exception.Message -Level ERROR
+        }
+
     }
-    
-    # 2. Export files if requested
+
+    # =====================================================
+    # FILES
+    # =====================================================
+
     if ($ExportFiles) {
-        Write-Log "Step $(if ($ExportFolders) {"2"} else {"1"}): Scanning files..." -Level "INFO" -ForegroundColor Cyan
-        $allFiles = Get-ChildItem -Path $Path -Recurse -Force -File -ErrorAction SilentlyContinue
-        $filteredFiles = $allFiles
-        if ($CutoffDate) {
-            $filteredFiles = $allFiles | Where-Object { $_.LastWriteTime -lt $CutoffDate }
-            Write-Log "Date filter applied: $($filteredFiles.Count) files kept out of $($allFiles.Count)" -Level "INFO" -ForegroundColor Yellow
-        } else {
-            Write-Log "Found $($allFiles.Count) files" -Level "INFO" -ForegroundColor Green
-        }
-        
-        $counter = 0
-        foreach ($file in $filteredFiles) {
-            $counter++
-            if ($counter % 1000 -eq 0) {
-                Write-Log "  Processing files: $counter/$($filteredFiles.Count)" -Level "INFO" -ForegroundColor Gray
+
+        Write-Log "Step 2: Exporting files..." -ForegroundColor Cyan
+
+        Get-ChildItem `
+            -Path $Path `
+            -File `
+            -Recurse `
+            -Force `
+            -ErrorAction SilentlyContinue |
+
+        ForEach-Object {
+
+            try {
+
+                if ($CutoffDate) {
+
+                    if ($_.LastWriteTime -ge $CutoffDate) {
+                        return
+                    }
+
+                }
+
+                $fileCount++
+
+                if ($fileCount % 1000 -eq 0) {
+                    Write-Log "Files exported: $fileCount"
+                }
+
+                [PSCustomObject]@{
+                    FullName      = $_.FullName
+                    Name          = $_.Name
+                    Length        = $_.Length
+                    Size_MB       = [math]::Round($_.Length / 1MB, 2)
+                    CreationTime  = $_.CreationTime
+                    LastWriteTime = $_.LastWriteTime
+                    Type          = "File"
+                    DirectoryName = $_.DirectoryName
+                } |
+                ConvertTo-Csv -NoTypeInformation |
+                Select-Object -Skip 1 |
+                Add-Content $OutputCsv
+
             }
-            $allItems += [PSCustomObject]@{
-                FullName      = $file.FullName
-                Name          = $file.Name
-                Length        = $file.Length
-                Size_MB       = [math]::Round($file.Length / 1MB, 2)
-                CreationTime  = $file.CreationTime.ToString('M/d/yyyy h:mm:ss tt')
-                LastWriteTime = $file.LastWriteTime.ToString('M/d/yyyy h:mm:ss tt')
-                Type          = "File"
-                DirectoryName = $file.DirectoryName
+            catch {
+                Write-Log "Skipped file: $($_.FullName)"
             }
+
         }
+
     }
-    
-    # 3. Export to CSV
-    Write-Log "Step $(if ($ExportFolders -and $ExportFiles) {"3"} elseif ($ExportFolders -or $ExportFiles) {"2"} else {"1"}): Exporting to CSV..." -Level "INFO" -ForegroundColor Cyan
-    $allItems | Export-Csv -Path $OutputCsv -NoTypeInformation -Encoding UTF8
-    
-    # Statistics
-    Write-Log "=== EXPORT COMPLETE ===" -Level "INFO" -ForegroundColor Green
-    if ($ExportFolders) {
-        $folderCount = $allItems | Where-Object { $_.Type -eq "Folder" } | Measure-Object | Select-Object -ExpandProperty Count
-        Write-Log "Exported folders: $folderCount" -Level "INFO" -ForegroundColor Cyan
-    }
-    if ($ExportFiles) {
-        $fileCount = $allItems | Where-Object { $_.Type -eq "File" } | Measure-Object | Select-Object -ExpandProperty Count
-        Write-Log "Exported files: $fileCount" -Level "INFO" -ForegroundColor Cyan
-    }
-    Write-Log "Total items exported: $($allItems.Count)" -Level "INFO" -ForegroundColor Cyan
+
+    Write-Log "=== EXPORT COMPLETE ===" -ForegroundColor Green
+    Write-Log "Folders exported: $folderCount"
+    Write-Log "Files exported: $fileCount"
+    Write-Log "CSV: $OutputCsv"
 }
+
 
 # ------------------------------------------------------------
 #  Preview, Recreate, Fix (same as before – omitted for brevity)
